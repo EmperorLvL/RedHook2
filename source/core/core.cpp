@@ -90,10 +90,10 @@ namespace rh2
             return false;
 
         // rage::scrThread::GetCmdFromhash
-        if (loc = "E8 ? ? ? ? 8B 9C F5 ? ? ? ?"_Scan)
+        if (loc = "48 8B 15 ? ? ? ? 4C 8B C9 49"_Scan)
         {
-            g_rage__scrThread__GetCmdFromHash = loc.get_call();
-            s_CommandHash = g_s_CommandHash = loc.get_call().add(3).get_lea();
+            g_rage__scrThread__GetCmdFromHash = loc;
+            s_CommandHash = g_s_CommandHash = loc.add(0x23).get_lea();
         }
         else
             return false;
