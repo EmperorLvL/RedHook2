@@ -19,7 +19,6 @@
 #include <mutex>
 #include <atomic>
 #include <unordered_set>
-
 #include <fstream>
 
 namespace rh2
@@ -88,7 +87,7 @@ namespace rh2
             g_PatchVectorResults = loc;
         else
             return false;
-
+        
         // rage::scrThread::GetCmdFromhash
         if (loc = "48 8B 15 ? ? ? ? 4C 8B C9 49"_Scan)
         {
