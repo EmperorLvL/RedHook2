@@ -97,7 +97,7 @@ namespace rh2
         else
             return false;
 
-        if (loc = "4C 8D 05 ? ? ? ? 4D 8B 08 4D 85 C9 74 11")
+        if (loc = "4C 8D 05 ? ? ? ? 4D 8B 08 4D 85 C9 74 11"_Scan)
             rage::scrProgram::sm_Globals = g_rage__scrProgram__sm_Globals = loc.get_lea();
         else
             false;
