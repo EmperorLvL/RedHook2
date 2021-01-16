@@ -15,7 +15,7 @@ namespace rh2::logging
         template<typename... Args>
         void log(const std::string& format_str, const Args&... args)
         {
-            this->push("MESSAGE", fmt::format(format_str, args...));
+            this->push("", fmt::format(format_str, args...));
         }
 
         template<typename... Args>

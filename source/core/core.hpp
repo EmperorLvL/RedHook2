@@ -28,13 +28,16 @@ namespace rh2
 
     void ScriptWait(const std::chrono::high_resolution_clock::duration& duration);
 
-    template<typename T>
-    T* GetGlobalPtr(uint32_t index)
+    static UINT64* GetGlobalPtr(int index)
     {
         if (!rage::scrProgram::sm_Globals)
             return nullptr;
 
-        return *reinterpret_cast<T**>(
-            &rage::scrProgram::sm_Globals[index >> 18 & 0x3F][index & 0x3FFFF]);
+        auto global_address = &rage::scrProgram::sm_Globals[index >> 18 & 0x3F][index & 0x3FFFF];
+
+        if (global_address == nullptr)
+            return nullptr;
+
+        return global_address;
     }
 } // namespace rh2

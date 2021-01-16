@@ -30,8 +30,12 @@ namespace rh2
     MemoryLocation g_s_CommandHash;
     MemoryLocation g_rage__scrThread__GetCmdFromHash;
     MemoryLocation g_rage__scrProgram__sm_Globals;
+    MemoryLocation g_FrameCount;
 
     std::unique_ptr<hooking::CommandHook> g_waitHook;
+
+    u64*                                 m_FrameCountPtr;
+    u64                                  FrameCountVar;
 
     Script*                              g_activeScript = nullptr;
     std::vector<std::pair<hMod, Script>> g_scripts;
@@ -41,9 +45,9 @@ namespace rh2
 
     Fiber g_gameFiber;
 
-    bool InitializeHooks();
     bool InitializeCommandHooks();
     void LoadMods();
+    void UnloadMods();
     void CreateLogs();
 
     bool Init(hMod module)
@@ -56,9 +60,9 @@ namespace rh2
 
         CreateLogs();
 
-        logs::g_hLog->log("Initializing RedHook2");
-
-        logs::g_hLog->log("Waiting for game window");
+        logs::g_hLog->log("// RED HOOK 2 (build {}, v1.0.1311.23)", __DATE__);
+        logs::g_hLog->log("Started");
+        logs::g_hLog->log("Waiting for game window...");
 
         // Wait for the game window, otherwise we can't do much
         auto timeout = high_resolution_clock::now() + 20s;
@@ -77,76 +81,92 @@ namespace rh2
         }
         logs::g_hLog->log("Game window found");
 
-        logs::g_hLog->log("Searching patterns");
+        logs::g_hLog->log("Performing pattern scan");
 
         // Find sigs
         MemoryLocation loc;
 
         // PatchVectorResults
         if (loc = "8B 41 18 4C 8B C1 85 C0"_Scan)
+        {
             g_PatchVectorResults = loc;
+            logs::g_hLog->log("PVR -> found");
+        }
         else
+        {
+            logs::g_hLog->error("failed to find PVR");
             return false;
+        }
         
         // rage::scrThread::GetCmdFromhash
         if (loc = "48 8B 15 ? ? ? ? 4C 8B C9 49"_Scan)
         {
             g_rage__scrThread__GetCmdFromHash = loc;
             s_CommandHash = g_s_CommandHash = loc.add(0x23).get_lea();
+            logs::g_hLog->log("GCFH -> found");
         }
         else
+        {
+            logs::g_hLog->error("failed to find GCFH");
             return false;
+        }
 
         if (loc = "4C 8D 05 ? ? ? ? 4D 8B 08 4D 85 C9 74 11"_Scan)
+        {
             rage::scrProgram::sm_Globals = g_rage__scrProgram__sm_Globals = loc.get_lea();
+            logs::g_hLog->log("SGP -> found");
+        }
         else
+        {
+            logs::g_hLog->error("failed to find SGP");
             false;
+        }
 
-        logs::g_hLog->log("Patterns found");
+        if (loc = "8B 05 ? ? ? ? 41 89 45 1C"_Scan)
+        {
+            m_FrameCountPtr = g_FrameCount = loc.add(2).rip(4);
+            logs::g_hLog->log("FCP -> found");
+        }
+        else
+        {
+            logs::g_hLog->error("failed to find FCP");
+            return false;
+        }
 
-        logs::g_hLog->log("Initializing Minhook");
-        auto st = MH_Initialize();
+        logs::g_hLog->log("Finished pattern scan");
+
+        logs::g_hLog->log("Initializing Minhook...");
+        MH_STATUS st = MH_Initialize();
         if (st != MH_OK)
         {
             logs::g_hLog->log("Minhook failed to initialize {} ({})", MH_StatusToString(st), st);
             return false;
         }
-        logs::g_hLog->log("Minhook initialized");
 
-        logs::g_hLog->log("Initializing hooks");
-        if (!InitializeHooks())
-        {
-            return false;
-        }
-        logs::g_hLog->log("Hooks initialized");
-
-        logs::g_hLog->log("Waiting for natives");
+        logs::g_hLog->log("Waiting for natives...");
         while (!(*s_CommandHash))
         {
             std::this_thread::sleep_for(100ms);
         }
         logs::g_hLog->log("Natives loaded");
 
-        logs::g_hLog->log("Initializing input hook");
+        logs::g_hLog->log("Initializing input hook...");
         if (!hooking::input::InitializeHook())
         {
+            logs::g_hLog->error("Failed to initialize input hook");
             return false;
         }
-        logs::g_hLog->log("Input hook initialized");
 
-        logs::g_hLog->log("Initializing native hooks");
+        logs::g_hLog->log("Initializing native hooks...");
         if (!InitializeCommandHooks())
         {
+            logs::g_hLog->fatal("Failed to initialize native hooks");
             return false;
         }
-        logs::g_hLog->log("Natives initialized");
-
-        logs::g_hLog->log("RedHook2 initialized");
 
         logs::g_hLog->log("Loading mods");
         std::thread thrd(LoadMods);
         thrd.detach();
-
         return true;
     }
 
@@ -207,33 +227,37 @@ namespace rh2
         FreeLibraryAndExitThread(static_cast<HMODULE>(g_module), 0);
     }
 
-    bool InitializeHooks()
-    {
-        return true;
-    }
-
     void MyWait(rage::scrThread::Info* info)
     {
-        if (g_unloading)
-            return g_waitHook->orig(info);
-
-        if (!g_gameFiber)
+        if (FrameCountVar != *m_FrameCountPtr)
         {
-            if (!(g_gameFiber = Fiber::ConvertThreadToFiber()))
+            FrameCountVar = *m_FrameCountPtr;
+            /*if (GetAsyncKeyState(VK_END) & 0x8000)
+                UnloadMods();
+            else if (GetAsyncKeyState(VK_ADD) & 0x8000)
+                LoadMods();*/
+
+            if (g_unloading)
+                return g_waitHook->orig(info);
+
+            if (!g_gameFiber)
             {
-                g_gameFiber = Fiber::CurrentFiber();
+                if (!(g_gameFiber = Fiber::ConvertThreadToFiber()))
+                {
+                    g_gameFiber = Fiber::CurrentFiber();
+                }
             }
-        }
 
-        // GET_HASH_OF_THIS_SCRIPT_NAME
-        if (Invoker::Invoke<u32>(0xBC2C927F5C264960ull) == 0x27eb33d7u) // main
-        {
-            std::lock_guard _(g_scriptMutex);
-            for (auto& [_, script] : g_scripts)
+            // GET_HASH_OF_THIS_SCRIPT_NAME
+            if (Invoker::Invoke<u32>(0xBC2C927F5C264960ull) == 0x27eb33d7u) // main
             {
-                g_activeScript = &script;
-                script.update();
-                g_activeScript = nullptr;
+                std::lock_guard _(g_scriptMutex);
+                for (auto& [_, script] : g_scripts)
+                {
+                    g_activeScript = &script;
+                    script.update();
+                    g_activeScript = nullptr;
+                }
             }
         }
 
@@ -252,10 +276,8 @@ namespace rh2
 
     void CreateLogs()
     {
-        std::filesystem::create_directories("RedHook2/logs");
-
         logs::g_hLog = logging::LogMgr::CreateLog<logging::GenericFileLogger>(
-            "hook_log", "RedHook2/logs/hook.log");
+            "hook_log", ".\\RedHook2.log");
     }
 
     Fiber GetGameFiber()
@@ -318,7 +340,7 @@ namespace rh2
     {
         using namespace std::filesystem;
 
-        for (auto it = directory_iterator("scripts/"); it != directory_iterator(); ++it)
+        for (auto it = directory_iterator(".\\"); it != directory_iterator(); ++it)
         {
             if (it->path().extension() == ".asi")
             {
@@ -335,7 +357,17 @@ namespace rh2
                 }
             }
         }
-
         logs::g_hLog->log("Mods loaded");
+    }
+
+    void UnloadMods()
+    {
+        g_unloading = true;
+        while (!g_modules.empty())
+        {
+            ScriptUnregister(static_cast<HMODULE>(*g_modules.begin()));
+        }
+        g_unloading = false;
+        logs::g_hLog->log("Unloaded {} mods", g_modules.size());
     }
 } // namespace rh2
